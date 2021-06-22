@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="50b5038f-265e-47f3-93d2-540e3f04150f" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="286f5746-73af-4b4b-bcb9-04f85d20d103" >
+		<db:my-sql-connection host="${db.host}" port="${db.port}" user="${db.user}" password="${db.password}" database="${db.instance}"/>
+	</db:config>
+	
+	<configuration-properties doc:name="Configuration properties" doc:id="a2eff700-2f16-4a1d-a272-1d7c7667a62f" file="project.properties" />
+	<flow name="json-encryptionFlow" doc:id="23628768-9544-43ae-a12e-a8d1ad0147c2" >
+		<http:listener doc:name="Listener" doc:id="77677495-186d-4e94-983c-6b1b4cb37b95" config-ref="HTTP_Listener_config" path="/json-encryption">
+			<http:response >
+				<http:body ><![CDATA[#[%dw 2.0
+output application/json
+---
+{
+	"payload Before Encryption" : vars.payloadBeforeEncryption,
+	"payload After Encryption" : payload
+}]]]></http:body>
+			</http:response>
+		</http:listener>
+		<set-payload value='#[{&#10;   "book":[&#10;      {&#10;         "id":"444",&#10;         "language":"C",&#10;         "edition":"First",&#10;         "author":"Dennis Ritchie"&#10;      },&#10;      {&#10;         "id":"555",&#10;         "language":"C++",&#10;         "edition":"second",&#10;         "author":"Bjarne Stroustrup"&#10;      }&#10;   ]&#10;}]' doc:name="Capturing the HTTP Request body" doc:id="7ec477a0-79a4-41b4-b05a-5a5fbadd4a63" />
+		<logger level="INFO" doc:name="Log payload before encryption" doc:id="5bd16edc-ab88-4a47-acbd-bdc13df2d366" message="#[payload]"/>
+		<ee:transform doc:name="Encrypting the required field" doc:id="607d093c-0f26-4d5f-b80a-7d599f54c4b9" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+import dw::Crypto
+import toBase64 from dw::core::Binaries
+---
+payload.book map {
+					id : $.id,                                                                
+					language : $.language,       	                                          
+					edition : Crypto::HMACBinary(toBase64($.edition), "HmacSHA512"),     	  
+					author : $.author        	                                             
+					}]]></ee:set-payload>
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="payloadBeforeEncryption" ><![CDATA[payload]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<foreach doc:name="For Each" doc:id="f4456149-bd00-4df2-85ae-dc69b105ae94" >
+			<db:insert doc:name="Insert into DB" doc:id="9fe222be-c0f0-4805-b8fd-c1f67a1c5f41" config-ref="Database_Config">
+				<db:sql ><![CDATA[Insert into MW_ENC (ID,LANGUAGE,EDITION,AUTHOR) values (:id,:language,:edition,:author)]]></db:sql>
+				<db:input-parameters ><![CDATA[#[{
+	id : payload.id,
+	language : payload.language,
+	edition : payload.edition,
+	author : payload.author
+}]]]></db:input-parameters>
+			</db:insert>
+		</foreach>
+		<logger level="INFO" doc:name="Log payload after encryption" doc:id="6e2755f0-2ad5-4ebb-bc0f-52856a2d11fe" message="#[payload]"/>
+	</flow>
+</mule>
